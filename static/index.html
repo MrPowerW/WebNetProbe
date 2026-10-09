@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebNetProbe 内网流量探针平台 v2.21.15</title>
+    <title>WebNetProbe 内网流量探针平台 v2.21.26</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <script src="vendor/chart.umd.min.js"></script>
     <style>
@@ -248,7 +248,7 @@
             </div>
             <div class="title-group">
                 <h1>WebNetProbe 内网流量探针平台</h1>
-                <div class="subtitle">Network Traffic Probe <b id="verBadge" style="color:#00ff88;">v2.21.15</b></div>
+                <div class="subtitle">Network Traffic Probe <b id="verBadge" style="color:#00ff88;">v2.21.26</b></div>
             </div>
         </div>
         <div class="header-right">
@@ -781,18 +781,27 @@
                         <input id="attackBlockReason" class="search-box" style="width:160px;" placeholder="原因（可选）">
                         <button class="btn" style="color:#ff6464; border-color:#ff6464;" onclick="manualBlockIp()">⛔ 手动封禁</button>
                     </div>
+                    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:8px;">
+                        <button class="btn" style="color:#ffc800; border-color:#ffc800;" onclick="sitDelSelected()">🗑️ 删除选中攻击</button>
+                        <button class="btn" style="color:#ff6464; border-color:#ff6464;" onclick="sitDelAll()">🗑️ 清空全部攻击记录</button>
+                        <span style="color:#7f8fa4; font-size:11px;">删除仅清除检测记录，不影响已生效封禁（可到下方批量解除）</span>
+                    </div>
                 </div>
                 <div class="card-body" style="padding:0;">
                     <div style="color:#7f8fa4; font-size:11px; padding:8px 12px;">检测规则：SYN 洪泛（≥30 SYN_SENT）· DDoS 连接风暴（端口连接 ≥60 且来源 ≥10）· 端口扫描（单源覆盖 ≥15 端口）· 暴力破解（敏感端口尝试 ≥20）· 异常外联（≥40 条）。同源 60 秒去抖。</div>
-                    <table class="data-table"><thead><tr><th>时间</th><th>级别</th><th>类型</th><th>源 IP</th><th>端口</th><th>详情</th><th>操作</th></tr></thead>
-                    <tbody id="sitAttackTable"><tr><td colspan="7" style="text-align:center; color:#7f8fa4;">加载中...</td></tr></tbody></table>
+                    <table class="data-table"><thead><tr><th style="width:28px;"><input type="checkbox" id="sitAtkAll" onclick="sitAtkToggleAll(this)"></th><th>时间</th><th>级别</th><th>类型</th><th>源 IP</th><th>端口</th><th>详情</th><th>操作</th></tr></thead>
+                    <tbody id="sitAttackTable"><tr><td colspan="8" style="text-align:center; color:#7f8fa4;">加载中...</td></tr></tbody></table>
                 </div>
             </div>
             <div class="card">
-                <div class="card-header"><div class="card-title">⛔ 封禁列表（手动解除）</div></div>
+                <div class="card-header"><div class="card-title">⛔ 封禁列表（手动解除）</div>
+                    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                        <button class="btn" style="color:#00ff88; border-color:#00ff88; padding:2px 10px;" onclick="sitUnblockSelected()">✅ 解除选中</button>
+                        <button class="btn" style="color:#ff6464; border-color:#ff6464; padding:2px 10px;" onclick="sitUnblockAll()">✅ 解除全部封禁</button>
+                    </div></div>
                 <div class="card-body" style="padding:0;">
-                    <table class="data-table"><thead><tr><th>IP</th><th>类型</th><th>原因</th><th>封禁时间</th><th>状态</th><th>操作</th></tr></thead>
-                    <tbody id="sitBlockList"><tr><td colspan="6" style="text-align:center; color:#7f8fa4;">加载中...</td></tr></tbody></table>
+                    <table class="data-table"><thead><tr><th style="width:28px;"><input type="checkbox" id="sitBlkAll" onclick="sitBlkToggleAll(this)"></th><th>IP</th><th>类型</th><th>原因</th><th>封禁时间</th><th>状态</th><th>操作</th></tr></thead>
+                    <tbody id="sitBlockList"><tr><td colspan="7" style="text-align:center; color:#7f8fa4;">加载中...</td></tr></tbody></table>
                 </div>
             </div>
             <div class="card" style="margin-top:15px;">
@@ -827,9 +836,9 @@
                         <button class="btn" onclick="loadHistoryRange(24)">24小时</button>
                         <button class="btn" onclick="loadHistoryRange(72)">3天</button>
                         <span style="color:#7f8fa4; font-size:11px; margin-left:10px;">自定义:</span>
-                        <input type="date" id="histStartD" class="search-box" style="width:140px;"> <input type="time" id="histStartT" step="1" class="search-box" style="width:105px;">
+                        <span id="WNP_TR_hist"></span>
                         <span style="color:#7f8fa4; font-size:11px;">至</span>
-                        <input type="date" id="histEndD" class="search-box" style="width:140px;"> <input type="time" id="histEndT" step="1" class="search-box" style="width:105px;">
+
                         <button class="btn success" onclick="loadHistoryCustom()">📈 查询</button>
                         <span style="color:#7f8fa4; font-size:11px;">（≤6小时为秒级精度，超6小时自动降为分钟级）</span>
                     </div>
@@ -932,7 +941,7 @@
                         <div class="modal-content" style="max-width:760px;">
                             <h3>权限分发 - <span id="permUser" style="color:#00e5ff;"></span></h3>
                             <div style="font-size:12px; color:#7f8fa4; margin-bottom:10px;">
-                                勾选该用户可查看 / 可修改的功能模块；不勾选任何模块 = 按角色默认权限。
+                                √ 表示该用户当前已开通的模块权限（含角色默认）；勾选/取消后点击「保存权限」实时生效。
                             </div>
                             <div id="permList" style="display:grid; grid-template-columns:repeat(2,1fr); gap:6px 24px; max-height:380px; overflow:auto; margin-bottom:12px;"></div>
                             <div style="text-align:right;">
@@ -963,9 +972,9 @@
                             <button class="btn" onclick="loadAuditRange(24)">24小时</button>
                             <button class="btn" onclick="loadAuditRange(72)">3天</button>
                             <span style="color:#7f8fa4; font-size:11px; margin-left:10px;">自定义:</span>
-                            <input type="date" id="auditStartD" class="search-box" style="width:140px;"> <input type="time" id="auditStartT" step="1" class="search-box" style="width:105px;">
+                            <span id="WNP_TR_audit"></span>
                             <span style="color:#7f8fa4; font-size:11px;">至</span>
-                            <input type="date" id="auditEndD" class="search-box" style="width:140px;"> <input type="time" id="auditEndT" step="1" class="search-box" style="width:105px;">
+
                             <button class="btn success" onclick="loadAuditCustom()">🔍 查询</button>
                             <button class="btn" onclick="clearAuditRange()">全部</button>
                             <button class="btn" onclick="loadAudit()">🔄 刷新</button>
@@ -1084,8 +1093,7 @@
                     <div style="margin-bottom:16px; padding:14px; background:#0d1322; border-radius:4px; border:1px solid #1e3a5f;">
                         <div style="color:#00d4ff; font-size:13px; margin-bottom:8px;">🕐 导出时间段（精确到秒，留空 = 导出全部数据）</div>
                         <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap; color:#7f8fa4; font-size:12px;">
-                            <span>开始: <input type="date" id="expStartD" class="search-box" style="width:145px;"> <input type="time" id="expStartT" step="1" class="search-box" style="width:105px;"></span>
-                            <span>结束: <input type="date" id="expEndD" class="search-box" style="width:145px;"> <input type="time" id="expEndT" step="1" class="search-box" style="width:105px;"></span>
+                            <span id="WNP_TR_exp"></span>
                             <button class="btn success" onclick="updateExportHrefs()">🔄 应用时间段</button>
                             <button class="btn" onclick="clearExportRange()">✖ 清除</button>
                             <span id="expHint" style="color:#ffc800; font-size:11px;"></span>
@@ -1498,9 +1506,9 @@
                         <select id="compFmt" class="search-box" style="width:110px; margin-right:6px; color:#00ff88; border-color:#00ff88;">
                             <option value="csv">CSV</option>
                             <option value="json">JSON</option>
-                            <option value="pdf">PDF</option>
                         </select>
                         <a class="btn" href="/api/export/compliance?format=csv" download onclick="return exportCompliance(this)" style="color:#00ff88; border-color:#00ff88;">📥 一键导出合规体检表（评分+优化建议）</a>
+                        <button class="btn" onclick="resetHashBaseline()" title="软件升级或确认文件无误后重置哈希基线，下次校验重建">🔏 重置哈希基线</button>
                         <button class="btn" onclick="loadCompliance()">🔄 刷新</button>
                     </div>
                 </div>
@@ -1562,6 +1570,12 @@
         document.addEventListener('DOMContentLoaded', () => {
             initAuth();
             loadVersion();
+            // v2.21.21 统一时间范围组件渲染（3 处占位 → 快捷下拉+月历+时间）
+            initTimeRanges();
+            // v2.21.19 预加载 3 处数据源可用日期（月历着色依据）
+            loadDateOptions('usage');
+            loadDateOptions('audit');
+            loadDateOptions('sessions');
             setInterval(refreshVersion, 60000);  // v2.21.15 版本号 60s 实时同步
             // v2.21.10 重活延迟分批：消除 DOMContentLoaded Violation（登录守卫不变）
             setTimeout(() => {
@@ -1583,6 +1597,139 @@
             updateExportHrefs();
             setTimeout(startScan, 2000);
         });
+
+        // v2.21.21 统一时间范围组件（固化模板：一处定义，全系统生效；改模板即全局更新）
+        function timeRangeHTML(prefix, source) {
+            return '<select id="' + prefix + 'Range" class="search-box" style="width:108px;" onchange="applyQuickRange(&quot;' + prefix + '&quot;)">'
+                + '<option value="">全部时间</option><option value="today">今天</option><option value="7d">近7天</option><option value="30d">近30天</option><option value="90d">近90天</option><option value="custom">自定义</option></select> '
+                + '<input type="text" id="' + prefix + 'StartD" class="search-box" style="width:112px; cursor:pointer;" readonly placeholder="\u{1F4C5} 开始日期" onclick="openCalendar(&quot;' + prefix + 'StartD&quot;,&quot;' + source + '&quot;)" title="点击选择日期"> '
+                + '<input type="time" id="' + prefix + 'StartT" step="1" class="search-box" style="width:100px;"> '
+                + '<input type="text" id="' + prefix + 'EndD" class="search-box" style="width:112px; cursor:pointer;" readonly placeholder="\u{1F4C5} 结束日期" onclick="openCalendar(&quot;' + prefix + 'EndD&quot;,&quot;' + source + '&quot;)" title="点击选择日期"> '
+                + '<input type="time" id="' + prefix + 'EndT" step="1" class="search-box" style="width:100px;">';
+        }
+        function initTimeRanges() {
+            const conf = [['hist', 'usage'], ['audit', 'audit'], ['exp', 'sessions']];
+            conf.forEach(c => {
+                const host = document.getElementById('WNP_TR_' + c[0]);
+                if (host && !host.getAttribute('data-rendered')) {
+                    host.innerHTML = timeRangeHTML(c[0], c[1]);
+                    host.setAttribute('data-rendered', '1');
+                }
+            });
+        }
+
+        // v2.21.20 日期数据缓存：各数据源有数据的日期（月历面板着色依据）
+        const dateCache = {};
+        async function loadDateOptions(source) {
+            try {
+                const data = await fetchAPI('/api/time/available-dates?source=' + source);
+                dateCache[source] = (data && data.dates) || [];
+            } catch(e) { dateCache[source] = []; }
+        }
+
+        // ============ 月历面板（有数据实体色可点 / 无数据灰色禁用 / 选中高亮 / 清除·今天） ============
+        let calCtx = null;
+        function ensureCalPanel() {
+            let p = document.getElementById('calPanel');
+            if (p) return p;
+            if (!document.getElementById('calStyle')) {
+                const st = document.createElement('style'); st.id = 'calStyle';
+                st.textContent = '#calPanel{position:absolute;z-index:9999;background:#0d1322;border:1px solid #1e3a5f;border-radius:6px;padding:10px;width:264px;box-shadow:0 6px 24px rgba(0,0,0,.55);font-size:12px;color:#e0e6ed;user-select:none;}'
+                    + '#calPanel .cal-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;color:#00d4ff;font-weight:bold;}'
+                    + '#calPanel .cal-head button{background:#12203a;border:1px solid #1e3a5f;color:#00d4ff;border-radius:4px;cursor:pointer;padding:2px 8px;}'
+                    + '#calPanel .cal-week{display:grid;grid-template-columns:repeat(7,1fr);text-align:center;color:#7f8fa4;margin-bottom:4px;}'
+                    + '#calPanel .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;}'
+                    + '#calPanel .cal-day{padding:6px 0;text-align:center;border-radius:4px;cursor:pointer;color:#e0e6ed;background:#132036;}'
+                    + '#calPanel .cal-day:hover{background:#1e3a5f;}'
+                    + '#calPanel .cal-day.no-data{color:#5a6478;background:#0d1322;cursor:not-allowed;}'
+                    + '#calPanel .cal-day.no-data:hover{background:#0d1322;}'
+                    + '#calPanel .cal-day.today{outline:1px solid #00d4ff;}'
+                    + '#calPanel .cal-day.sel{background:#0077ff;color:#fff;font-weight:bold;}'
+                    + '#calPanel .cal-day .cal-dot{display:inline-block;width:5px;height:5px;background:#00ff88;border-radius:50%;margin-left:3px;vertical-align:middle;}'
+                    + '#calPanel .cal-foot{display:flex;justify-content:space-between;margin-top:8px;}'
+                    + '#calPanel .cal-foot button{background:#12203a;border:1px solid #1e3a5f;color:#e0e6ed;border-radius:4px;cursor:pointer;padding:3px 10px;}'
+                    + '#calPanel .cal-foot button:hover{border-color:#00d4ff;color:#00d4ff;}'
+                    + '#calPanel .cal-empty{padding:6px 0;}';
+                document.head.appendChild(st);
+            }
+            p = document.createElement('div');
+            p.id = 'calPanel'; p.style.display = 'none';
+            document.body.appendChild(p);
+            document.addEventListener('click', (e) => {
+                if (calCtx && !e.target.closest('#calPanel') && !e.target.closest('[onclick*="openCalendar"]')) closeCal();
+            });
+            return p;
+        }
+        function openCalendar(fieldId, source) {
+            const panel = ensureCalPanel();
+            const inp = document.getElementById(fieldId);
+            const rect = inp.getBoundingClientRect();
+            const now = new Date();
+            let cur = inp.value;
+            let y = cur ? parseInt(cur.slice(0, 4)) : now.getFullYear();
+            let m = cur ? parseInt(cur.slice(5, 7)) - 1 : now.getMonth();
+            calCtx = { fieldId, source, viewY: y, viewM: m, dates: dateCache[source] || [] };
+            renderCalendar();
+            panel.style.display = 'block';
+            panel.style.left = Math.min(rect.left, window.innerWidth - 290) + 'px';
+            panel.style.top = (rect.bottom + 6) + 'px';
+        }
+        function renderCalendar() {
+            const c = calCtx; if (!c) return;
+            const panel = document.getElementById('calPanel');
+            const has = new Set(c.dates);
+            const first = new Date(c.viewY, c.viewM, 1);
+            const startDow = first.getDay();
+            const daysInMonth = new Date(c.viewY, c.viewM + 1, 0).getDate();
+            const wk = ['日', '一', '二', '三', '四', '五', '六'];
+            const now = new Date();
+            const todayKey = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+            const selKey = document.getElementById(c.fieldId).value;
+            let h = '<div class="cal-head"><button onclick="calMonth(-1)">◀</button><span>' + c.viewY + '年' + (c.viewM + 1) + '月</span><button onclick="calMonth(1)">▶</button></div>';
+            h += '<div class="cal-week">' + wk.map(w => '<div>' + w + '</div>').join('') + '</div><div class="cal-grid">';
+            for (let i = 0; i < startDow; i++) h += '<div class="cal-empty"></div>';
+            for (let d = 1; d <= daysInMonth; d++) {
+                const key = c.viewY + '-' + String(c.viewM + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+                const hasData = has.has(key);
+                const cls = 'cal-day' + (hasData ? '' : ' no-data') + (key === todayKey ? ' today' : '') + (key === selKey ? ' sel' : '');
+                h += '<div class="' + cls + '"' + (hasData ? ' onclick="pickCalDate(&quot;' + key + '&quot;)"' : '') + '>' + d + (hasData ? '<i class="cal-dot"></i>' : '') + '</div>';
+            }
+            h += '</div><div class="cal-foot"><button onclick="calClear()">清除</button><button onclick="calToday()">今天</button></div>';
+            panel.innerHTML = h;
+        }
+        function calMonth(step) {
+            const c = calCtx; if (!c) return;
+            c.viewM += step;
+            if (c.viewM < 0) { c.viewM = 11; c.viewY--; }
+            if (c.viewM > 11) { c.viewM = 0; c.viewY++; }
+            renderCalendar();
+        }
+        function pickCalDate(key) { if (!calCtx) return; document.getElementById(calCtx.fieldId).value = key; closeCal(); }
+        function calClear() { if (!calCtx) return; document.getElementById(calCtx.fieldId).value = ''; closeCal(); }
+        function calToday() {
+            if (!calCtx) return;
+            const t = new Date();
+            document.getElementById(calCtx.fieldId).value = t.getFullYear() + '-' + String(t.getMonth() + 1).padStart(2, '0') + '-' + String(t.getDate()).padStart(2, '0');
+            closeCal();
+        }
+        function closeCal() { const p = document.getElementById('calPanel'); if (p) p.style.display = 'none'; calCtx = null; }
+
+        // ============ 快捷时间段（全部/今天/近7天/近30天/近90天/自定义） ============
+        function applyQuickRange(prefix) {
+            const sel = document.getElementById(prefix + 'Range');
+            const sd = document.getElementById(prefix + 'StartD'), ed = document.getElementById(prefix + 'EndD');
+            const st = document.getElementById(prefix + 'StartT'), et = document.getElementById(prefix + 'EndT');
+            const f = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+            const now = new Date();
+            if (sel.value === 'today') { sd.value = f(now); ed.value = f(now); st.value = '00:00:00'; et.value = '23:59:59'; }
+            else if (sel.value === '7d' || sel.value === '30d' || sel.value === '90d') {
+                const n = parseInt(sel.value);
+                const s = new Date(now); s.setDate(s.getDate() - n + 1);
+                sd.value = f(s); ed.value = f(now); st.value = '00:00:00'; et.value = '23:59:59';
+            }
+            else if (sel.value === 'custom') { /* 保持用户已选，等待日历精调 */ }
+            else { sd.value = ''; ed.value = ''; st.value = ''; et.value = ''; }
+        }
 
         function dtVal(dId, tId, defT) {
             // v2.21.14 日历选择：date(日历) + time(选择器) 组合，无需手工输入
@@ -1668,6 +1815,10 @@
                     hideLogin();
                     applyRoleUI(r.user);
                     applyExportTokens();
+                    // v2.21.19 登录后重跑时间下拉（登录前 DOMContentLoaded 被 401 拦截导致只有"全部时间"）
+                    loadDateOptions('usage');
+                    loadDateOptions('audit');
+                    loadDateOptions('sessions');
                     auditNav('dashboard');
                     if (r.user.must_change && r.user.role !== 'admin') openPwdModal(true);
                     else showPwdAgeBanner();
@@ -1716,6 +1867,10 @@
                     hideLogin();
                     applyRoleUI(r.user);
                     applyExportTokens();
+                    // v2.21.19 自动登录（F5 保持登录）后重跑时间下拉
+                    loadDateOptions('usage');
+                    loadDateOptions('audit');
+                    loadDateOptions('sessions');
                     if (r.user.must_change && r.user.role !== 'admin') openPwdModal(true);
                     else showPwdAgeBanner();
                 } else { window.WNP_TOKEN = ''; try { localStorage.removeItem('wnp_token'); } catch(e) {} showLogin(); }
@@ -1849,17 +2004,21 @@
                     const pwdCell = pwdDays > 90 ? '<span style="color:#ff6464;" title="超过90天未改密">' + pwdDays + ' 天 ⚠</span>' : '<span style="color:#7f8fa4;">' + pwdDays + ' 天</span>';
                     return '<tr>' +
                         '<td>' + u.id + '</td><td>' + u.username + (isSelf ? ' <span style="color:#00ff88;font-size:10px;">(我)</span>' : '') + '</td><td>' + (u.display_name || '-') + '</td>' +
-                        '<td><span class="role-tag ' + roleCls + '">' + u.role.toUpperCase() + '</span></td>' +
+                        '<td><span class="role-tag ' + roleCls + '">' + (u.username === 'admin' ? '超级管理员' : u.role.toUpperCase()) + '</span></td>' +
                         '<td>' + (u.email || '-') + '</td>' +
                         '<td>' + (u.status ? '<span style="color:#00ff88;">启用</span>' : '<span style="color:#ff6464;">停用</span>') + '</td>' +
                         '<td>' + (u.must_change ? '<span style="color:#ffc800;">是</span>' : '否') + '</td>' +
                         '<td>' + pwdCell + '</td>' +
                         '<td style="font-size:11px;" title="查看/修改模块由 admin 分发">' +
-                            (u.perm_configured ? '<span style="color:#00e5ff;">查看' + (u.perm_view || []).length + ' 修改' + (u.perm_write || []).length + '</span>' : '<span style="color:#7f8fa4;">按角色默认</span>') + ' <button class="btn" style="padding:1px 6px;font-size:10px;" onclick="configPerms(\'' + u.username + '\')">配置</button>' +
+                            (u.username === 'admin'
+                                ? '<span style="color:#00ff88;">全权限（超级管理员 · 不可分发）</span>'
+                                : (u.perm_configured ? '<span style="color:#00e5ff;">查看' + (u.perm_view || []).length + ' 修改' + (u.perm_write || []).length + '</span>' : '<span style="color:#7f8fa4;">按角色默认</span>') + ' <button class="btn" style="padding:1px 6px;font-size:10px;" onclick="configPerms(\'' + u.username + '\')">配置</button>') +
                         '</td>' +
                         '<td>' + (u.last_login || '-') + '</td>' +
                         '<td style="font-size:11px;">' +
-                            '<select onchange="chgUserRole(' + u.id + ', this.value)" style="background:#0a0f1c;color:#e8eef6;border:1px solid #1e3a5f;border-radius:4px;padding:2px 4px;">' +
+                            (u.username === 'admin'
+                                ? '<span style="color:#00e5ff; font-size:11px;">🔒 超级管理员（不可变更角色/停用/删除）</span> <button class="btn" style="padding:2px 8px;font-size:11px;" onclick="resetUserPwd(\'' + u.username + '\')">重置密码</button> <button class="btn" style="padding:2px 8px;font-size:11px;" onclick="viewUserPwd(\'' + u.username + '\')">查看密码</button>'
+                                : '<select onchange="chgUserRole(' + u.id + ', this.value)" style="background:#0a0f1c;color:#e8eef6;border:1px solid #1e3a5f;border-radius:4px;padding:2px 4px;">' +
                             '<option value="admin"' + (u.role === 'admin' ? ' selected' : '') + '>admin</option>' +
                             '<option value="operator"' + (u.role === 'operator' ? ' selected' : '') + '>operator</option>' +
                             '<option value="audit"' + (u.role === 'audit' ? ' selected' : '') + '>audit</option>' +
@@ -1868,7 +2027,7 @@
                             '<button class="btn" style="padding:2px 8px;font-size:11px;" onclick="toggleUser(' + u.id + ', ' + (u.status ? 0 : 1) + ')">' + (u.status ? '停用' : '启用') + '</button> ' +
                             '<button class="btn" style="padding:2px 8px;font-size:11px;" onclick="resetUserPwd(\'' + u.username + '\')">重置密码</button> ' +
                             '<button class="btn" style="padding:2px 8px;font-size:11px;" onclick="viewUserPwd(\'' + u.username + '\')">查看密码</button> ' +
-                            '<button class="btn" style="padding:2px 8px;font-size:11px;color:#ff6464;" onclick="delUser(\'' + u.username + '\')">删除</button>' +
+                            '<button class="btn" style="padding:2px 8px;font-size:11px;color:#ff6464;" onclick="delUser(\'' + u.username + '\')">删除</button>') +
                         '</td></tr>';
                 }).join('');
             } catch(e) {}
@@ -1882,6 +2041,20 @@
             }
         }
         const PERM_MODULES = [['dashboard','仪表盘'],['network','网络'],['hosts','主机'],['devices','设备'],['sessions','实时会话'],['alerts','告警'],['history','历史'],['compliance','合规/SOP'],['settings','管理中心'],['export','导出中心'],['tools','网络工具'],['situational','态势感知'],['ipquery','IP查询'],['ipcalc','IP计算'],['firewall','防火墙'],['policies','流控策略'],['whitelist','白名单'],['attacks','攻击防护'],['apps','应用分析'],['audit','审计日志']];
+        // v2.21.26 角色默认权限矩阵（√ 表示已开通；admin 可在此基础单独勾选/取消，保存实时生效）
+        const ALL_MODS = PERM_MODULES.map(x => x[0]);
+        const ROLE_DEFAULT_VIEW = {
+            admin: ALL_MODS.slice(),
+            operator: ALL_MODS.filter(m => m !== 'audit'),
+            audit: ALL_MODS.slice(),
+            viewer: ['dashboard', 'network', 'hosts', 'devices', 'sessions', 'alerts', 'history', 'ipquery', 'ipcalc', 'situational']
+        };
+        const ROLE_DEFAULT_WRITE = {
+            admin: ALL_MODS.slice(),
+            operator: ['devices', 'policies', 'firewall', 'attacks', 'alerts', 'whitelist', 'tools', 'apps', 'export', 'history', 'situational', 'ipquery', 'ipcalc'],
+            audit: ['export'],
+            viewer: []
+        };
         async function loadAbout() {
             const box = document.getElementById('aboutBox');
             if (!box) return;
@@ -1926,12 +2099,16 @@
             document.getElementById('permUser').textContent = username;
             const rows = window.__permUsers || {};
             const u = rows[username] || {};
+            const role = u.role || 'viewer';
             const pv = u.perm_view || [], pw = u.perm_write || [];
+            // v2.21.26 有效权限 = 角色默认 ∪ admin 显式配置（√ 表示已开通）
+            const effV = Array.from(new Set((ROLE_DEFAULT_VIEW[role] || []).concat(pv)));
+            const effW = Array.from(new Set((ROLE_DEFAULT_WRITE[role] || []).concat(pw)));
             document.getElementById('permList').innerHTML = PERM_MODULES.map(([m, label]) =>
                 '<div style="display:flex; align-items:center; gap:10px; background:#0d1322; border:1px solid #1e3a5f; border-radius:4px; padding:6px 10px;">' +
                 '<span style="flex:1; color:#e8eef6;">' + label + ' <span style="color:#4a5568; font-size:10px;">' + m + '</span></span>' +
-                '<label style="font-size:12px; color:#7f8fa4; display:flex; align-items:center; gap:4px;"><input type="checkbox" data-module="' + m + '" data-act="view"' + (pv.indexOf(m) >= 0 ? ' checked' : '') + '> 查看</label>' +
-                '<label style="font-size:12px; color:#7f8fa4; display:flex; align-items:center; gap:4px;"><input type="checkbox" data-module="' + m + '" data-act="write"' + (pw.indexOf(m) >= 0 ? ' checked' : '') + '> 修改</label>' +
+                '<label style="font-size:12px; color:#7f8fa4; display:flex; align-items:center; gap:4px;"><input type="checkbox" data-module="' + m + '" data-act="view"' + (effV.indexOf(m) >= 0 ? ' checked' : '') + '> 查看</label>' +
+                '<label style="font-size:12px; color:#7f8fa4; display:flex; align-items:center; gap:4px;"><input type="checkbox" data-module="' + m + '" data-act="write"' + (effW.indexOf(m) >= 0 ? ' checked' : '') + '> 修改</label>' +
                 '</div>').join('');
             if (username === 'admin') {
                 document.querySelectorAll('#permList input[type=checkbox]').forEach(cb => { cb.checked = true; cb.disabled = true; });
@@ -2801,6 +2978,7 @@
             return true;
         }
         async function loadAudit() {
+            loadDateOptions('audit');
             const tbody = document.getElementById('auditTable');
             if (!tbody) return;
             try {
@@ -2859,6 +3037,7 @@
 
         // ==================== 历史数据（时间段选择 + 秒级精度） ====================
         function loadHistory() {
+            loadDateOptions('usage');
             if (!document.getElementById('histStartD').value) syncHistInputs(Math.floor(Date.now()/1000) - 3600, Math.floor(Date.now()/1000));
             loadHistoryRange(1);
         }
@@ -3691,6 +3870,41 @@
         }
 
         // ==================== 网络工具 ====================
+        // ==================== 态势感知：批量删除/解除 ====================
+        function sitAtkToggleAll(cb) {
+            document.querySelectorAll('.sitAtkCb').forEach(x => { if (!x.disabled) x.checked = cb.checked; });
+        }
+        function sitBlkToggleAll(cb) {
+            document.querySelectorAll('.sitBlkCb').forEach(x => { x.checked = cb.checked; });
+        }
+        async function sitDelSelected() {
+            const tss = Array.from(document.querySelectorAll('.sitAtkCb:checked:not(:disabled)')).map(x => x.dataset.ts);
+            if (!tss.length) { alert('请先勾选要删除的攻击记录'); return; }
+            if (!confirm('确认删除选中的 ' + tss.length + ' 条攻击记录？（不影响已生效封禁）')) return;
+            const r = await fetch('/api/attacks/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ts: tss }) }).then(x => x.json()).catch(() => null);
+            alert(r ? ('已删除 ' + (r.deleted || 0) + ' 条，剩余 ' + (r.remain || 0)) : '删除失败');
+            loadSituational(true);
+        }
+        async function sitDelAll() {
+            if (!confirm('确认清空全部攻击检测记录？（不影响已生效封禁）')) return;
+            const r = await fetch('/api/attacks/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ all: true }) }).then(x => x.json()).catch(() => null);
+            alert(r ? ('已清空 ' + (r.deleted || 0) + ' 条攻击记录') : '操作失败');
+            loadSituational(true);
+        }
+        async function sitUnblockSelected() {
+            const ips = Array.from(document.querySelectorAll('.sitBlkCb:checked')).map(x => x.dataset.ip);
+            if (!ips.length) { alert('请先勾选要解除的封禁'); return; }
+            if (!confirm('确认解除选中的 ' + ips.length + ' 条封禁？（同步删除对应防火墙规则）')) return;
+            const r = await fetch('/api/attacks/unblock_multi', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ips: ips }) }).then(x => x.json()).catch(() => null);
+            alert(r ? (r.msg || '已解除') : '操作失败');
+            loadSituational(true);
+        }
+        async function sitUnblockAll() {
+            if (!confirm('确认解除全部封禁？（同步删除对应防火墙规则）')) return;
+            const r = await fetch('/api/attacks/unblock_multi', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ all: true }) }).then(x => x.json()).catch(() => null);
+            alert(r ? (r.msg || '已解除') : '操作失败');
+            loadSituational(true);
+        }
         // ==================== 态势感知 ====================
         let situationalTimer = 0;
         let sitRefreshInterval = 5000;
@@ -3722,7 +3936,7 @@
                 const act = a.blocked
                     ? '<span style="color:#00ff88; font-size:11px;">✓ 已封禁</span>'
                     : '<button class="btn" style="padding:2px 8px; color:#ff6464; border-color:#ff6464;" onclick="blockAttackFromEvent(&#39; + ipRaw + &#39;)">⛔ 手工封禁</button>';
-                return '<tr' + hl + '><td>' + escapeHtml(a.time || '') + '</td><td><span style="background:' + bg + ';color:' + col + ';padding:1px 8px;border-radius:8px;font-size:11px;">' + lv + '</span></td><td>' + escapeHtml(a.type || '') + '</td><td>' + src + '</td><td style="font-size:11px;">' + escapeHtml(a.ports || '-') + '</td><td style="font-size:11px;">' + escapeHtml(a.msg || '') + '</td><td>' + act + '</td></tr>';
+                return '<tr' + hl + '><td><input type="checkbox" class="sitAtkCb" data-ts="' + a.timestamp + '"' + (a.blocked ? ' checked disabled' : '') + '></td><td>' + escapeHtml(a.time || '') + '</td><td><span style="background:' + bg + ';color:' + col + ';padding:1px 8px;border-radius:8px;font-size:11px;">' + lv + '</span></td><td>' + escapeHtml(a.type || '') + '</td><td>' + src + '</td><td style="font-size:11px;">' + escapeHtml(a.ports || '-') + '</td><td style="font-size:11px;">' + escapeHtml(a.msg || '') + '</td><td>' + act + '</td></tr>';
             }).join('');
             tb.innerHTML = rows || '<tr><td colspan="7" style="text-align:center; color:#7f8fa4;">暂无攻击事件（检测线程持续监控）</td></tr>';
             const bl = document.getElementById('sitBlockList');
@@ -3730,7 +3944,7 @@
                 const ok = b.status && b.status.indexOf('blocked') === 0;
                 const col = ok ? '#ff6464' : '#ffc800';
                 const bg = ok ? 'rgba(255,100,100,.14)' : 'rgba(255,200,0,.1)';
-                return '<tr><td><a href="https://x.threatbook.com/v5/ip/' + b.ip + '" target="_blank" rel="noopener" style="color:#b464ff; text-decoration:underline;">' + b.ip + ' 🔗</a></td><td>' + escapeHtml(b.type || '') + '</td><td style="font-size:11px;">' + escapeHtml(b.reason || '') + '</td><td>' + escapeHtml(b.time || '') + '</td><td><span style="background:' + bg + ';color:' + col + ';padding:1px 8px;border-radius:8px;font-size:11px;">' + escapeHtml(b.status || '') + '</span></td><td><button class="btn" style="padding:3px 10px;" onclick="unblockAttack(&quot;' + b.ip + '&quot;)">解除</button></td></tr>';
+                return '<tr><td><input type="checkbox" class="sitBlkCb" data-ip="' + b.ip + '"></td><td><a href="https://x.threatbook.com/v5/ip/' + b.ip + '" target="_blank" rel="noopener" style="color:#b464ff; text-decoration:underline;">' + b.ip + ' 🔗</a></td><td>' + escapeHtml(b.type || '') + '</td><td style="font-size:11px;">' + escapeHtml(b.reason || '') + '</td><td>' + escapeHtml(b.time || '') + '</td><td><span style="background:' + bg + ';color:' + col + ';padding:1px 8px;border-radius:8px;font-size:11px;">' + escapeHtml(b.status || '') + '</span></td><td><button class="btn" style="padding:3px 10px;" onclick="unblockAttack(&quot;' + b.ip + '&quot;)">解除</button></td></tr>';
             }).join('');
             bl.innerHTML = brows || '<tr><td colspan="6" style="text-align:center; color:#7f8fa4;">暂无封禁</td></tr>';
         }
@@ -4015,6 +4229,14 @@
                 </div>
             `).join('');
             box.innerHTML = html || '<div style="color:#ff6464; padding:14px;">未返回校验结果</div>';
+        }
+
+        // v2.21.18 重置数据真实性校验哈希基线（admin）
+        async function resetHashBaseline() {
+            if (!confirm('确认重置哈希基线？\n软件升级或确认关键文件无误后执行，下次运行数据校验将重新建立基线。')) return;
+            const r = await fetchAPI('/api/compliance/hash-baseline/reset', { method: 'POST' });
+            if (r && r.ok) { alert(r.msg || '已重置'); runComplianceChecks(); }
+            else alert((r && r.msg) || '重置失败，请检查权限');
         }
 
         // ==================== 工具函数（智能单位，默认 MB/s 可切换） ====================

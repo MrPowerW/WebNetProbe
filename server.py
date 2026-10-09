@@ -21,7 +21,7 @@ except Exception:
     pass
 import time
 START_TIME = time.time()  # v2.11.3 服务启动时间（关于系统运行时长）
-VERSION = 'v2.21.15'  # v2.21.15 版本号固化单一来源（/api/version 与 /api/admin/info 均引用此常量，同步更新）
+VERSION = 'v2.21.26'  # 版本号固化单一来源（/api/version 与 /api/admin/info 均引用此常量，同步更新）
 import datetime
 import platform
 import subprocess
@@ -39,7 +39,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from app import db, oui, arp, policies, firewall, network_tools, compliance, auth, notify
 
 # ==================== 配置 ====================
-HOST = '0.0.0.0'
+HOST = os.environ.get('WNP_HOST') or '127.0.0.1'  # v2.21.17 空值/未设均回退本机，杜绝 getaddrinfo('') 抛 gaierror；内网部署 set WNP_HOST=0.0.0.0
 PORT = 8090
 STATIC_DIR = 'static'
 DATA_DIR = 'data'
@@ -797,24 +797,16 @@ def scan_subnet(subnet):
                         os_guess = ''
                         mac = arp_table.get(ip, '')  # 从ARP表读取MAC（跨平台）
                         
-                        hostname = _resolve_hostname(ip) or f"设备-{last_octet}"
-                        
+                        hostname = _resolve_hostname(ip) or ''  # v2.21.26 真实主机名（反解失败留空，前端显示 IP）
+                        os_guess = ''  # v2.21.26 不再编造 OS，保证数据真实性
                         if last_octet in [2,3,4,5,6,7,8,9,10]:
                             host_type = 'server'
-                            hostname = f"服务器-{last_octet}"
-                            os_guess = 'Linux/Windows Server'
                         elif last_octet in [20,21,22,23,24,25]:
                             host_type = 'camera'
-                            hostname = f"摄像头-{last_octet}"
-                            os_guess = 'IoT设备'
                         elif last_octet in [100,101,102]:
                             host_type = 'printer'
-                            hostname = f"打印机-{last_octet}"
-                            os_guess = '打印设备'
                         elif last_octet in [253,254]:
                             host_type = 'switch'
-                            hostname = '交换机/AP'
-                            os_guess = '网络设备'
                         else:
                             host_type = 'terminal'
                         
@@ -845,6 +837,8 @@ def scan_subnet(subnet):
                         old_host['status'] = 'offline'
                     if not old_host.get('mac'):
                         old_host['mac'] = arp_table.get(old_host['ip'], '')  # 补MAC
+                    if re.match(r'^(服务器|设备|摄像头|打印机)-\d+$', (old_host.get('hostname') or '')):
+                        old_host['hostname'] = ''  # v2.21.26 编造主机名清空（真实性）
                     found_hosts.append(old_host)
             # IP排序
             def ip_to_int(ip):
@@ -1495,6 +1489,10 @@ class ProbeHandler(SimpleHTTPRequestHandler):
                 if user['role'] == 'viewer' and not auth.can_view_full(user, path):
                     self._json_response({'error': '权限不足：该功能未向只读访客开放'}, status=403)
                     return
+                # v2.21.26 ADMIN_ONLY 前缀仅超级管理员可查看（用户管理/系统重置/通知配置）
+                if any(path.startswith(p) for p in auth.ADMIN_ONLY_PREFIXES) and user['username'] != 'admin' and user['role'] != 'admin':
+                    self._json_response({'error': '权限不足：仅超级管理员可访问此接口'}, status=403)
+                    return
                 # v2.11.2 细粒度模块权限（admin 分发查看模块）
                 module = auth.path_module(path)
                 if module and not auth.module_allowed(user, module, 'view'):
@@ -1943,6 +1941,11 @@ class ProbeHandler(SimpleHTTPRequestHandler):
                 except Exception:
                     _users, _nch = None, None
                 checks = compliance.run_checks(hd, db.list_devices(), db.list_policies(), sess, _users, _nch)
+                try:
+                    # v2.21.18 数据真实性 · 哈希值校验（关键文件 SHA-256 + 基线对比 + 数据库完整性）
+                    checks = checks + compliance.hash_integrity_checks()
+                except Exception:
+                    pass
                 # 合规告警同步：warn/fail 项写入告警流（同规则 10 分钟去重，避免轮询刷屏）
                 try:
                     _sync_compliance_alerts(checks)
@@ -1952,7 +1955,29 @@ class ProbeHandler(SimpleHTTPRequestHandler):
                     'checks': checks,
                     'generated_at': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 })
-        
+
+            elif path == '/api/time/available-dates':
+                # v2.21.19 自定义时间下拉：返回各数据源实际有数据的日期（降序）
+                _p = parse_qs(parsed.query)
+                _src = (_p.get('source') or [''])[0]
+                _dates = []
+                try:
+                    if _src == 'audit':
+                        _rows = db.query("SELECT DISTINCT substr(ts,1,10) AS d FROM audit WHERE ts IS NOT NULL AND ts != '' ORDER BY d DESC")
+                        _dates = [r['d'] for r in _rows if r.get('d')]
+                    elif _src == 'usage':
+                        _rows = db.query("SELECT DISTINCT date AS d FROM usage_daily WHERE date IS NOT NULL ORDER BY d DESC")
+                        _dates = [r['d'] for r in _rows if r.get('d')]
+                    elif _src == 'sessions':
+                        with history_lock:
+                            _sess = list(sessions_history)
+                        _dates = sorted({str(s.get('time', ''))[:10] for s in _sess if s.get('time')}, reverse=True)
+                    elif _src == 'alerts':
+                        _dates = sorted({datetime.datetime.fromtimestamp(a['timestamp'] / 1000).strftime('%Y-%m-%d') for a in alerts_history if a.get('timestamp')}, reverse=True)
+                except Exception:
+                    _dates = []
+                return self._json_response({'source': _src, 'dates': _dates})
+
             elif path == '/api/compliance/sop':
                 return self._json_response({'sop': compliance.sop()})
 
@@ -2089,6 +2114,21 @@ class ProbeHandler(SimpleHTTPRequestHandler):
             if r.get('ok'):
                 db.audit('user_perm', '分发权限: ' + uname + ' 查看=' + ','.join(data.get('perm_view') or []) + ' 修改=' + ','.join(data.get('perm_write') or []))
             return self._json_response(r)
+        elif self.path == '/api/compliance/hash-baseline/reset':
+            # v2.21.18 重置哈希基线（admin；软件升级/确认文件无误后调用，下次校验重建基线）
+            if not self._require_auth(admin=True):
+                return
+            try:
+                _bp = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'compliance_hashes.json')
+                if os.path.exists(_bp):
+                    os.remove(_bp)
+                try:
+                    db.audit('compliance_hash_reset', '重置数据真实性校验哈希基线')
+                except Exception:
+                    pass
+                return self._json_response({'ok': True, 'msg': '哈希基线已重置，下次运行数据校验将重建'})
+            except Exception as _e:
+                return self._json_response({'ok': False, 'msg': '重置失败: ' + str(_e)})
         elif self.path == '/api/users/update':
             return self._handle_user_update()
         elif self.path == '/api/users/delete':
@@ -2119,6 +2159,10 @@ class ProbeHandler(SimpleHTTPRequestHandler):
             return self._handle_attack_block()
         elif self.path == '/api/attacks/unblock':
             return self._handle_attack_unblock()
+        elif self.path == '/api/attacks/delete':
+            return self._handle_attack_delete()
+        elif self.path == '/api/attacks/unblock_multi':
+            return self._handle_attack_unblock_multi()
         elif self.path == '/api/attacks/auto_block':
             return self._handle_attack_auto_block()
         elif self.path == '/api/alerts/delete':
@@ -2308,6 +2352,63 @@ class ProbeHandler(SimpleHTTPRequestHandler):
         except Exception:
             pass
         return self._json_response({'status': 'ok', 'msg': '; '.join(msgs) if msgs else '已解除（无防火墙规则）', 'ip': ip})
+
+    def _handle_attack_delete(self):
+        """v2.21.26 批量删除攻击检测记录（ts 数组或全部），审计留痕"""
+        try:
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length).decode('utf-8')) if length else {}
+        except Exception:
+            return self._json_response({'status': 'error', 'msg': '请求体错误'})
+        _tok = self._auth_token()
+        _u, _ = auth.user_by_token(_tok) if _tok else (None, None)
+        _uname = _u['username'] if _u else 'unknown'
+        tss = body.get('ts') or []
+        all_flag = bool(body.get('all'))
+        with ATTACK_LOCK:
+            if all_flag:
+                _n = len(ATTACK_EVENTS)
+                ATTACK_EVENTS.clear()
+            else:
+                _set = set(str(x) for x in tss)
+                _before = len(ATTACK_EVENTS)
+                ATTACK_EVENTS[:] = [e for e in ATTACK_EVENTS if str(e.get('timestamp')) not in _set]
+                _n = _before - len(ATTACK_EVENTS)
+        db.audit('attacks_delete', '批量删除攻击检测记录 %d 条 by %s' % (_n, _uname))
+        return self._json_response({'status': 'ok', 'deleted': _n, 'remain': len(ATTACK_EVENTS)})
+
+    def _handle_attack_unblock_multi(self):
+        """v2.21.26 批量解除攻击封禁（ips 数组或全部），同步防火墙 + 审计留痕"""
+        try:
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length).decode('utf-8')) if length else {}
+        except Exception:
+            return self._json_response({'status': 'error', 'msg': '请求体错误'})
+        _tok = self._auth_token()
+        _u, _ = auth.user_by_token(_tok) if _tok else (None, None)
+        _uname = _u['username'] if _u else 'unknown'
+        ips = body.get('ips') or []
+        all_flag = bool(body.get('all'))
+        _targets = list(ATTACK_BLOCKS.keys()) if all_flag else [str(x).strip() for x in ips]
+        released = 0
+        for ip in _targets:
+            rec = ATTACK_BLOCKS.pop(ip, None)
+            if rec is None:
+                continue
+            released += 1
+            if rec.get('rule_id'):
+                try:
+                    firewall.delete_rule(rec['rule_id'])
+                except Exception:
+                    pass
+            try:
+                for r in db.list_firewall_rules():
+                    if r.get('remote_ip') == ip and r.get('rule_name', '').startswith('WNP-attack_'):
+                        db.delete_firewall_rule(r['id'])
+            except Exception:
+                pass
+        db.audit('block_release', '批量解除攻击封禁 %d 条（%s）by %s' % (released, ','.join(_targets[:5]), _uname))
+        return self._json_response({'status': 'ok', 'msg': '已解除 %d 条封禁' % released, 'released': released})
 
     def _handle_whitelist_add(self):
         """白名单添加（IP 或域名；域名需可解析）"""
@@ -2905,89 +3006,8 @@ class ProbeHandler(SimpleHTTPRequestHandler):
                 content_type = 'application/json; charset=utf-8'
                 filename = f"compliance_health_{timestamp}.json"
             elif _fmt == 'pdf':
-                try:
-                    from fpdf import FPDF
-                    # v2.19 固化 PDF：深信服样式表格化（表头/列宽/自动分页/页脚），真实可打开
-                    _CAT = {
-                        'ip_mac_conflict': '安全计算环境-访问控制', 'mac_dup': '安全计算环境-访问控制',
-                        'arp_scan_cross': '安全区域边界-入侵防范', 'oui_coverage': '安全计算环境-资产识别',
-                        'arp': '安全区域边界-网络访问控制', 'scan': '安全区域边界-入侵防范',
-                        'session': '安全通信网络-通信传输', 'netstat': '安全计算环境-安全审计',
-                        'dns': '安全通信网络-通信传输', 'bw': '安全计算环境-资源控制',
-                        'session_valid': '安全通信网络-通信传输', 'policy_valid': '安全区域边界-访问控制',
-                        'freshness': '安全区域边界-入侵防范', 'access_control': '安全计算环境-访问控制',
-                        'notify_ready': '安全管理中心-安全监测',
-                    }
-                    _ST = {'pass': '符合', 'ok': '符合', 'warn': '部分符合', 'fail': '不符合'}
-                    _RISK = {'pass': '低', 'ok': '低', 'warn': '中', 'fail': '高'}
-                    _W = (10, 32, 40, 55, 18, 15, 20)
-                    class _CompliancePdf(FPDF):
-                        def footer(self):
-                            self.set_font('hei', '', 8)
-                            self.set_y(-12)
-                            self.cell(0, 8, 'WebNetProbe 合规体检报告 - 第 {} 页 / 共 {{nb}} 页'.format(self.page_no()), align='C', new_x='LMARGIN', new_y='NEXT')
-                        def check_space(self, h):
-                            if self.get_y() + h > 278:
-                                self.add_page()
-                        def row(self, cells):
-                            _lines = []
-                            for _i, _t in enumerate(cells):
-                                self.set_font('hei', '', 8)
-                                try:
-                                    _parts = self.multi_cell(_W[_i], 5, str(_t), split_only=True)
-                                    _nl = max(1, len(_parts)) if isinstance(_parts, (list, tuple)) else 1
-                                except Exception:
-                                    _nl = max(1, int(self.get_string_width(str(_t)) / (_W[_i] * 0.5)) + 1)
-                                _lines.append(_nl)
-                            _h = max(_lines) * 5 + 2
-                            self.check_space(_h)
-                            _y0 = self.get_y()
-                            _x0 = 10
-                            for _i, _t in enumerate(cells):
-                                self.set_xy(_x0, _y0)
-                                self.set_font('hei', '', 8)
-                                self.multi_cell(_W[_i], 5, str(_t), border=1)
-                                _x0 += _W[_i]
-                            self.set_y(_y0 + _h)
-                        def head_row(self, cells):
-                            self.set_fill_color(23, 32, 61)
-                            self.set_text_color(0, 212, 255)
-                            self.set_font('hei', '', 9)
-                            for _i, _t in enumerate(cells):
-                                self.cell(_W[_i], 7, _t, border=1, fill=True, align='C')
-                            self.ln()
-                            self.set_text_color(0, 0, 0)
-                    pdf = _CompliancePdf('P', 'mm', 'A4')
-                    pdf.set_auto_page_break(auto=True, margin=16)
-                    pdf.add_page()
-                    _font_path = None
-                    for _fp in (r'C:\Windows\Fonts\simhei.ttf', r'C:\Windows\Fonts\msyh.ttc', r'C:\Windows\Fonts\simsun.ttc'):
-                        if os.path.exists(_fp):
-                            _font_path = _fp
-                            break
-                    if not _font_path:
-                        raise RuntimeError('未找到系统中文字体文件')
-                    pdf.add_font('hei', '', _font_path)
-                    pdf.set_font('hei', '', 16)
-                    pdf.cell(190, 10, 'WebNetProbe 合规体检报告', align='C', new_x='LMARGIN', new_y='NEXT')
-                    pdf.set_font('hei', '', 9)
-                    pdf.cell(190, 6, '生成时间：' + _ts, align='C', new_x='LMARGIN', new_y='NEXT')
-                    pdf.cell(190, 6, '评估依据：ISO/IEC 27001:2022 Annex A · 等保 3.0（GB/T 22239 三级）', align='C', new_x='LMARGIN', new_y='NEXT')
-                    pdf.ln(4)
-                    pdf.head_row(['序号', '检查类别', '检查项', '检查内容', '检查结果', '风险等级', '整改建议'])
-                    for _i, ch in enumerate(_checks, 1):
-                        _st = ch.get('status')
-                        pdf.row([_i, _CAT.get(ch.get('id'), '安全管理中心-综合管理'), ch.get('name'),
-                                 str(ch.get('detail', '')), _ST.get(_st, _st), _RISK.get(_st, '-'), _advice_for(ch)])
-                    pdf.ln(4)
-                    pdf.set_font('hei', '', 11)
-                    pdf.cell(190, 8, '合规体检评分：{:.1f} 分 / 满分 {} 分（{:.0f}%）'.format(score, total, (score / total * 100) if total else 0), new_x='LMARGIN', new_y='NEXT')
-                    pdf.cell(190, 8, '数据真实性：基于最新一次数据真实性校验结果动态生成', new_x='LMARGIN', new_y='NEXT')
-                    content = pdf.output(dest='S')
-                    content_type = 'application/pdf'
-                    filename = f"compliance_health_{timestamp}.pdf"
-                except Exception as _pe:
-                    return self._json_response({'status': 'error', 'msg': 'PDF 生成失败: ' + str(_pe)})
+                # v2.21.18 PDF 导出已停用（去除非标准库 fpdf 依赖），请使用 CSV 或 JSON
+                return self._json_response({'status': 'error', 'msg': 'PDF 导出已停用（v2.21.18），请使用 CSV 或 JSON 格式'})
             else:
                 # v2.19 深信服合规体检表样式：序号/检查类别/检查项/检查内容/检查结果/风险等级/整改建议
                 _CAT = {
@@ -3218,32 +3238,34 @@ def attack_monitor():
             d = by_dst.setdefault(lport, {'sources': set(), 'count': 0})
             d['sources'].add(rip); d['count'] += 1
         events = []
+        _local_ip = HOST or '本机'
         if syn >= 30:
             events.append({'ip': '-', 'type': 'SYN洪泛', 'level': 'high',
-                           'msg': 'SYN_SENT 状态连接 %d 条，疑似 SYN 洪泛攻击' % syn, 'ports': '-'})
+                           'msg': 'SYN_SENT 状态连接 %d 条，疑似 SYN 洪泛攻击' % syn, 'ports': '-', 'dst': '-'})
         for p, info in by_dst.items():
             if info['count'] >= 60 and len(info['sources']) >= 10:
                 for sip in info['sources']:
                     if _is_public_ip(sip):
                         events.append({'ip': sip, 'type': 'DDoS攻击', 'level': 'high',
                                        'msg': '对端口 %d 发起 %d 条连接（来源 %d 个），疑似 DDoS 攻击' % (p, info['count'], len(info['sources'])),
-                                       'ports': str(p)})
+                                       'ports': str(p), 'dst': '%s:%d' % (_local_ip, p)})
         for sip, info in by_src.items():
             if len(info['ports']) >= 15 and _is_public_ip(sip):
                 ports = ','.join(str(x) for x in sorted(info['ports'])[:8])
                 events.append({'ip': sip, 'type': '端口扫描', 'level': 'high',
                                'msg': '来自 %s 的连接覆盖 %d 个不同端口，疑似端口扫描' % (sip, len(info['ports'])),
-                               'ports': ports})
+                               'ports': ports, 'dst': '%s:%s' % (_local_ip, ports)})
         for sip, info in by_src.items():
             sens = [p for p in info['ports'] if p in _ATTACK_SENSITIVE_PORTS]
             if len(sens) >= 20:
                 events.append({'ip': sip, 'type': '暴力破解', 'level': 'high',
                                'msg': '来自 %s 对敏感端口 %s 的尝试 %d 次，疑似暴力破解' % (sip, ','.join(str(x) for x in sorted(set(sens))[:6]), len(sens)),
-                               'ports': ','.join(str(x) for x in sorted(set(sens))[:6])})
+                               'ports': ','.join(str(x) for x in sorted(set(sens))[:6]), 'dst': '%s:%s' % (_local_ip, ','.join(str(x) for x in sorted(set(sens))[:6]))})
         for sip, info in by_src.items():
             if info['count'] >= 40 and _is_public_ip(sip):
                 events.append({'ip': sip, 'type': '异常外联', 'level': 'medium',
-                               'msg': '本机对 %s 的连接数 %d，疑似异常外联' % (sip, info['count']), 'ports': '-'})
+                               'msg': '本机对 %s 的连接数 %d，疑似异常外联' % (sip, info['count']), 'ports': '-',
+                               'src': _local_ip, 'dst': sip})
         for ev in events:
             if _is_whitelisted(ev['ip']):
                 continue  # 白名单源不产生攻击告警
@@ -3253,7 +3275,7 @@ def attack_monitor():
             _attack_debounce[key] = now
             ts = time.strftime('%Y-%m-%d %H:%M:%S')
             rec = {'time': ts, 'timestamp': now * 1000, 'level': ev['level'], 'type': ev['type'],
-                   'src_ip': ev['ip'], 'dst_ip': '-', 'ports': str(ev['ports']), 'msg': ev['msg'],
+                   'src_ip': ev.get('src', ev['ip']), 'dst_ip': ev.get('dst', '-'), 'ports': str(ev['ports']), 'msg': ev['msg'],
                    'status': 'detected', 'highlight': True}
             with ATTACK_LOCK:
                 ATTACK_EVENTS.append(rec)
@@ -3662,6 +3684,17 @@ def _load_state():
         if isinstance(data.get('hosts'), list) and data['hosts']:
             with hosts_lock:
                 hosts_data = data['hosts']
+                # v2.21.26 清理编造数据：无 MAC 的编造主机移除；有 MAC 但主机名编造 → 清空主机名（保留 MAC，前端显示 IP）
+                _fake_pat = re.compile(r'^(服务器|设备|摄像头|打印机)-\d+$')
+                _new_hosts = []
+                for _h in hosts_data:
+                    _hn = (_h.get('hostname') or '').strip()
+                    if not _h.get('mac') and _fake_pat.match(_hn):
+                        continue
+                    if _fake_pat.match(_hn):
+                        _h['hostname'] = ''
+                    _new_hosts.append(_h)
+                hosts_data = _new_hosts
         print(f"[+] 已加载历史数据: 会话 {len(sessions_history)} 条, 告警 {len(alerts_history)} 条, 主机 {len(hosts_data)} 台")
     except Exception as e:
         print(f"[!] 历史数据加载失败(忽略): {e}")
@@ -3818,19 +3851,59 @@ def main():
     except Exception as e:
         print(f"[!] 设备注册表初始化失败: {e}")
     
-    print(f"\n[+] Web服务已启动: http://0.0.0.0:{PORT}")
-    print(f"[+] 请在浏览器访问 http://<本机IP>:{PORT}")
+    # v2.21.17 HTTPS 适配：data/ssl/server.crt + server.key 存在即启用 HTTPS（否则 HTTP）
+    _ssl_ctx = None
+    _proto = 'http'
+    _ssl_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'ssl')
+    _crt = os.path.join(_ssl_dir, 'server.crt'); _key = os.path.join(_ssl_dir, 'server.key')
+    if os.path.isfile(_crt) and os.path.isfile(_key):
+        try:
+            import ssl as _ssl
+            _ssl_ctx = _ssl.SSLContext(_ssl.PROTOCOL_TLS_SERVER)
+            _ssl_ctx.load_cert_chain(_crt, _key)
+            _proto = 'https'
+        except Exception as _se:
+            print('[!] HTTPS 证书加载失败，回退 HTTP: ' + repr(_se))
+            _proto = 'http'
+    else:
+        print('[+] 未检测到 HTTPS 证书（data/ssl/server.crt+server.key），使用 HTTP 协议')
+
+    print(f"\n[+] Web服务已启动: {_proto}://{HOST}:{PORT}  （默认仅本机；内网访问请设置环境变量 WNP_HOST=0.0.0.0 后重启）")
+    print(f"[+] 请在浏览器访问 {_proto}://<本机IP>:{PORT}")
     print(f"[+] 按 Ctrl+C 停止服务\n")
     
     # v2.11 初始化认证与通知模块（建表 + 首次创建 admin）
     auth.init()
     notify.init()
+    # v2.21.22 admin 硬编码超级管理员：启动时同步角色/启用/权限（不可变更/停用/删除/分发）
+    try:
+        auth.ensure_superadmin()
+    except Exception as _es:
+        print('[!] ensure_superadmin 失败: %r' % (_es,))
 
     # v2.21.2 服务异常自动恢复：偶发句柄/线程/accept 异常不再导致服务退出
     while True:
         try:
-            # ThreadingHTTPServer：并发处理请求，避免轮询/上报互相阻塞
-            server = ThreadingHTTPServer((HOST, PORT), ProbeHandler)
+            # v2.21.17 绑定容错：候选监听地址依次尝试（配置 HOST -> 127.0.0.1 -> 0.0.0.0），首个可绑定者生效，杜绝单地址解析失败导致服务反复重建
+            _cands = [HOST, '127.0.0.1', '0.0.0.0']
+            _tried = set()
+            server = None
+            _last_bind_err = None
+            for _h in _cands:
+                if not _h or _h in _tried:
+                    continue
+                _tried.add(_h)
+                try:
+                    server = ThreadingHTTPServer((_h, PORT), ProbeHandler)
+                    if _h != HOST:
+                        print(f'[+] 监听地址 {HOST!r} 不可用，已回退为 {_h}')
+                    break
+                except Exception as _be:
+                    _last_bind_err = _be
+            if server is None:
+                raise _last_bind_err or Exception('无法绑定监听端口')
+            if _ssl_ctx:
+                server.socket = _ssl_ctx.wrap_socket(server.socket, server_side=True)
             server.serve_forever()
             break
         except KeyboardInterrupt:
